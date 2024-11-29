@@ -110,7 +110,7 @@ def main():
 
     # Configuration inputs
     domain = st.text_input("Enter a Programming/Area (e.g., Python, Java, C++, HR, Data Science, Marketing)")
-    experience_level = st.slider("Experience Level (years)", min_value=1, max_value=50, step=1)
+    experience_level = st.number_input("Experience Level (years)", min_value=1, max_value=50, step=1, value=10)
     complexity = st.radio("Select Question Complexity", ["Basic", "Intermediate", "Advanced"])
     num_questions = st.number_input("Number of Questions to Generate", min_value=1, max_value=100, step=1, value=10)
 
@@ -121,7 +121,7 @@ def main():
 
         if generated_content:
             st.success("Questions generated successfully!")
-            st.write("### Generated Questions and Answers")
+            st.write("Generated Questions and Answers")
             st.text_area("Questions & Answers", generated_content, height=300)
 
             # Parse questions and answers
