@@ -27,7 +27,7 @@ def generate_interview_questions(domain, experience_level, complexity, num_quest
 
         # Initialize the Gemini model
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-pro",
+            model_name="gemini-1.5-flash",
             generation_config=generation_config,
         )
 
