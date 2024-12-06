@@ -156,55 +156,72 @@ def main():
         </div>
     """, unsafe_allow_html=True)
     st.title("Job Description Skills Extractor & Interview Question Generator")
-    uploaded_file = st.file_uploader("Upload Job Description (Word or PDF)", type=["docx", "pdf"])
+    
+    # Toggle between uploading JD or manually entering skills
+    input_method = st.radio("Select Input Method:", ["Upload Job Description", "Manually Input Skills"])
 
-    if uploaded_file:
-        job_name = os.path.splitext(uploaded_file.name)[0]
-        if uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            job_description = extract_text_from_docx(uploaded_file)
-        elif uploaded_file.type == "application/pdf":
-            job_description = extract_text_from_pdf(uploaded_file)
-        else:
-            st.error("Unsupported file type.")
-            return
+    skills = []
+    job_description = ""
 
-        if job_description.strip():
-            skills = extract_skills(job_description)
-            if skills:
-                st.success("Skills extracted successfully!")
-                st.write("### Extracted Skills:")
-                st.write(", ".join(skills))
-                experience_level = st.number_input("Experience Level (years)", min_value=1, max_value=50, step=1, value=10)
-                complexity = st.radio("Select Question Complexity", ["Basic", "Intermediate", "Advanced"])
-                num_questions = st.number_input("Number of Questions to Generate", min_value=1, max_value=100, step=1, value=10)
+    if input_method == "Upload Job Description":
+        uploaded_file = st.file_uploader("Upload Job Description (Word or PDF)", type=["docx", "pdf"])
 
-                if st.button("Generate Questions"):
-                    st.info("Generating interview questions. Please wait...")
-                    generated_content = generate_interview_questions(skills, experience_level, complexity, num_questions)
-
-                    if generated_content:
-                        st.success("Questions generated successfully!")
-                        st.write("Generated Questions and Answers")
-                        st.text_area("Questions & Answers", generated_content, height=300)
-                        qa_pairs = [
-                            {"Question": q.strip(), "Answer": a.strip()}
-                            for q, a in zip(*[iter(generated_content.splitlines())] * 2)
-                        ]
-
-                        # Export to Word
-                        word_file = export_to_word(qa_pairs, job_name)
-                        if word_file:
-                            st.download_button(
-                                label="Download as Word",
-                                data=word_file,
-                                file_name=f"{job_name}_Interview_Questions_&_Answers.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-
+        if uploaded_file:
+            job_name = os.path.splitext(uploaded_file.name)[0]
+            if uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                job_description = extract_text_from_docx(uploaded_file)
+            elif uploaded_file.type == "application/pdf":
+                job_description = extract_text_from_pdf(uploaded_file)
             else:
-                st.warning("No skills found in the job description.")
-        else:
-            st.error("Failed to extract text from the uploaded document.")
+                st.error("Unsupported file type.")
+                return
+
+            if job_description.strip():
+                skills = extract_skills(job_description)
+                if skills:
+                    st.success("Skills extracted successfully!")
+                    st.write("### Extracted Skills:")
+                    st.write(", ".join(skills))
+                else:
+                    st.warning("No skills found in the job description.")
+            else:
+                st.error("Failed to extract text from the uploaded document.")
+    
+    elif input_method == "Manually Input Skills":
+        st.info("Manually input skills below, separated by commas.")
+        skills_input = st.text_area("Enter Skills", placeholder="e.g., Python, SQL, Data Analysis")
+        if skills_input.strip():
+            skills = [skill.strip() for skill in skills_input.split(",") if skill.strip()]
+            st.write("### Entered Skills:")
+            st.write(", ".join(skills))
+
+    if skills:
+        experience_level = st.number_input("Experience Level (years)", min_value=1, max_value=50, step=1, value=10)
+        complexity = st.radio("Select Question Complexity", ["Basic", "Intermediate", "Advanced"])
+        num_questions = st.number_input("Number of Questions to Generate", min_value=1, max_value=100, step=1, value=10)
+
+        if st.button("Generate Questions"):
+            st.info("Generating interview questions. Please wait...")
+            generated_content = generate_interview_questions(skills, experience_level, complexity, num_questions)
+
+            if generated_content:
+                st.success("Questions generated successfully!")
+                st.write("Generated Questions and Answers")
+                st.text_area("Questions & Answers", generated_content, height=300)
+                qa_pairs = [
+                    {"Question": q.strip(), "Answer": a.strip()}
+                    for q, a in zip(*[iter(generated_content.splitlines())] * 2)
+                ]
+
+                # Export to Word
+                word_file = export_to_word(qa_pairs, "Job_Description" if input_method == "Upload Job Description" else "Manual_Skills")
+                if word_file:
+                    st.download_button(
+                        label="Download as Word",
+                        data=word_file,
+                        file_name=f"{'Job_Description' if input_method == 'Upload Job Description' else 'Manual_Skills'}_Interview_Questions_&_Answers.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
 
 if __name__ == "__main__":
     main()
