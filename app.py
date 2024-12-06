@@ -1,22 +1,39 @@
-import streamlit as st
-import pandas as pd
 import os
+import streamlit as st
+import re
+from docx import Document
+import io
 from dotenv import load_dotenv
 import google.generativeai as genai
-import io
-from docx import Document
+import PyPDF2
+from docx.shared import Pt
 
-# Load environment variables from .env file
+# Load environment variables from .env
 load_dotenv()
 
-# Configure Gemini API key
+# Configure Gemini API
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Function to generate interview questions using Gemini
-def generate_interview_questions(domain, experience_level, complexity, num_questions):
-    """Generate interview questions and answers using Gemini."""
+# Predefined list of skills for regex matching
+PREDEFINED_SKILLS = [
+    "Python", "Java", "SQL", "Machine Learning", "Data Analysis",
+    "Data Engineering", "AWS", "Azure", "Docker", "Kubernetes",
+    "ETL", "Big Data", "Hadoop", "Spark", "Tableau", "Power BI",
+    "AWS Glue", "PySpark", "Aurora DB", "Dynamo DB", "Redshift",
+    "Data Warehousing", "CI/CD", "Stone branch", "Scheduling Tool"
+]
+
+# Function to extract multi-word skills using regex
+def match_skill(text, skills_list):
+    matched_skills = set()
+    for skill in skills_list:
+        if re.search(r'\b' + re.escape(skill) + r'\b', text, re.IGNORECASE):
+            matched_skills.add(skill)
+    return matched_skills
+
+# Function to extract skills using Gemini API
+def gemini_extract_skills(text):
     try:
-        # Define generation configuration
         generation_config = {
             "temperature": 1,
             "top_p": 0.95,
@@ -24,65 +41,98 @@ def generate_interview_questions(domain, experience_level, complexity, num_quest
             "max_output_tokens": 8192,
             "response_mime_type": "text/plain",
         }
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash", generation_config=generation_config)
+        chat_session = model.start_chat()
+        prompt = (
+            "Extract all skills from the following job description text. "
+            "Ensure the response contains only skill names, separated by commas:\n\n"
+            f"{text}"
+        )
+        response = chat_session.send_message(prompt)
+        skills_text = response.text.strip()
+        skills = {skill.strip() for skill in skills_text.split(",") if skill.strip()}
+        return skills
+    except Exception as e:
+        st.error(f"Failed to extract skills using Gemini API: {e}")
+        return set()
 
-        # Initialize the Gemini model
+# Extract text from Word
+def extract_text_from_docx(docx_file):
+    text = ''
+    try:
+        doc = Document(docx_file)
+        for para in doc.paragraphs:
+            text += para.text + "\n"
+    except Exception as e:
+        st.error(f"Error extracting text from DOCX: {e}")
+    return text
+
+# Extract text from PDF
+def extract_text_from_pdf(pdf_file):
+    text = ''
+    try:
+        reader = PyPDF2.PdfReader(pdf_file)
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    except Exception as e:
+        st.error(f"Error extracting text from PDF: {e}")
+    return text
+
+# Combine skills from regex and Gemini
+def extract_skills(job_description):
+    regex_skills = match_skill(job_description, PREDEFINED_SKILLS)
+    gemini_skills = gemini_extract_skills(job_description)
+    return list(regex_skills.union(gemini_skills))
+
+# Generate interview questions using Gemini
+def generate_interview_questions(skills, experience_level, complexity, num_questions):
+    try:
         model = genai.GenerativeModel(
             model_name="gemini-1.5-flash",
-            generation_config=generation_config,
+            generation_config={
+                "temperature": 1,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": 8192,
+                "response_mime_type": "text/plain",
+            },
         )
-
-        # Start a chat session
         chat_session = model.start_chat()
-
-        # Build the prompt dynamically based on the input domain
         prompt = (
-            f"Generate {num_questions} interview questions and answers for a {domain} professional "
-            f"with {experience_level} years of experience. The questions should be of {complexity} complexity. "
-            f"Each question should be followed by a corresponding answer."
+            f"Generate {num_questions} interview questions and answers for a professional "
+            f"with skills: {', '.join(skills)}, "
+            f"{experience_level} years of experience. Questions should be of {complexity} complexity."
         )
-
-        # Send the prompt and get the response
         response = chat_session.send_message(prompt)
         return response.text.strip()
     except Exception as e:
         st.error(f"Error fetching questions: {e}")
         return ""
 
-# Function to export data to an Excel file and return the file as a BytesIO object
-def export_to_excel(data):
-    """Exports the data to an Excel file and returns the file in memory as a BytesIO object."""
+# Export to Word with proper formatting and alignment
+def export_to_word(data, job_name):
     try:
-        # Create a pandas DataFrame from the list of dictionaries
-        df = pd.DataFrame(data)
-
-        # Save to a BytesIO buffer using openpyxl (default engine for pandas)
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Interview Questions')
-
-        output.seek(0)  # Rewind the buffer
-        return output
-    except Exception as e:
-        st.error(f"Error exporting to Excel: {e}")
-        return None
-
-# Function to export data to a Word document and return the file as a BytesIO object
-def export_to_word(data):
-    """Exports the data to a Word document and returns the file in memory as a BytesIO object."""
-    try:
-        # Create a Word document
         doc = Document()
-        doc.add_heading('Interview Questions and Answers', 0)
-
+        doc.add_heading(f'{job_name} - Interview Questions and Answers', 0)
+        
+        # For each Q&A pair, we ensure the formatting is uniform
         for qa in data:
-            # Add question and answer to Word
-            doc.add_heading(qa['Question'], level=1)
-            doc.add_paragraph(qa['Answer'])
-
-        # Save to a BytesIO buffer
+            # Add Question with a uniform format
+            question_paragraph = doc.add_paragraph(qa['Question'])
+            question_paragraph.alignment = 1  # Center-align the question
+            
+            # Add Answer with a uniform format
+            answer_paragraph = doc.add_paragraph(qa['Answer'])
+            answer_paragraph.alignment = 0  # Left-align the answer
+            
+            # Optional: Adjust font size for readability
+            for para in doc.paragraphs:
+                for run in para.runs:
+                    run.font.size = Pt(12)
+        
         output = io.BytesIO()
         doc.save(output)
-        output.seek(0)  # Rewind the buffer
+        output.seek(0)
         return output
     except Exception as e:
         st.error(f"Error exporting to Word: {e}")
@@ -90,6 +140,7 @@ def export_to_word(data):
 
 # Main Streamlit app
 def main():
+    st.set_page_config(page_title="Mazo", page_icon="📄")
     # Centered logo
     st.markdown("""
         <style>
@@ -104,53 +155,56 @@ def main():
             <img src="https://mazobeam.com/wp-content/uploads/2023/12/mazoid-1.png" alt="MazoBot Logo" width="200"/>
         </div>
     """, unsafe_allow_html=True)
+    st.title("Job Description Skills Extractor & Interview Question Generator")
+    uploaded_file = st.file_uploader("Upload Job Description (Word or PDF)", type=["docx", "pdf"])
 
-    # Display the title "MazoMate"
-    st.title("MazoMate - Interview Question Generator")
+    if uploaded_file:
+        job_name = os.path.splitext(uploaded_file.name)[0]
+        if uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            job_description = extract_text_from_docx(uploaded_file)
+        elif uploaded_file.type == "application/pdf":
+            job_description = extract_text_from_pdf(uploaded_file)
+        else:
+            st.error("Unsupported file type.")
+            return
 
-    # Configuration inputs
-    domain = st.text_input("Enter a Programming/Area (e.g., Python, Java, C++, HR, Data Science, Marketing)")
-    experience_level = st.number_input("Experience Level (years)", min_value=1, max_value=50, step=1, value=10)
-    complexity = st.radio("Select Question Complexity", ["Basic", "Intermediate", "Advanced"])
-    num_questions = st.number_input("Number of Questions to Generate", min_value=1, max_value=100, step=1, value=10)
+        if job_description.strip():
+            skills = extract_skills(job_description)
+            if skills:
+                st.success("Skills extracted successfully!")
+                st.write("### Extracted Skills:")
+                st.write(", ".join(skills))
+                experience_level = st.number_input("Experience Level (years)", min_value=1, max_value=50, step=1, value=10)
+                complexity = st.radio("Select Question Complexity", ["Basic", "Intermediate", "Advanced"])
+                num_questions = st.number_input("Number of Questions to Generate", min_value=1, max_value=100, step=1, value=10)
 
-    # Generate Questions Button
-    if st.button("Generate Questions"):
-        st.info("Generating interview questions. Please wait...")
-        generated_content = generate_interview_questions(domain, experience_level, complexity, num_questions)
+                if st.button("Generate Questions"):
+                    st.info("Generating interview questions. Please wait...")
+                    generated_content = generate_interview_questions(skills, experience_level, complexity, num_questions)
 
-        if generated_content:
-            st.success("Questions generated successfully!")
-            st.write("Generated Questions and Answers")
-            st.text_area("Questions & Answers", generated_content, height=300)
+                    if generated_content:
+                        st.success("Questions generated successfully!")
+                        st.write("Generated Questions and Answers")
+                        st.text_area("Questions & Answers", generated_content, height=300)
+                        qa_pairs = [
+                            {"Question": q.strip(), "Answer": a.strip()}
+                            for q, a in zip(*[iter(generated_content.splitlines())] * 2)
+                        ]
 
-            # Parse questions and answers
-            qa_pairs = []
-            lines = generated_content.split('\n')
-            for i in range(0, len(lines), 2):  # Assuming questions and answers alternate
-                question = lines[i].strip() if i < len(lines) else ""
-                answer = lines[i + 1].strip() if (i + 1) < len(lines) else ""
-                qa_pairs.append({"Question": question, "Answer": answer})
+                        # Export to Word
+                        word_file = export_to_word(qa_pairs, job_name)
+                        if word_file:
+                            st.download_button(
+                                label="Download as Word",
+                                data=word_file,
+                                file_name=f"{job_name}_Interview_Questions_&_Answers.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
 
-            # Export to Excel
-            excel_file = export_to_excel(qa_pairs)
-            if excel_file:
-                st.download_button(
-                    label="Download as Excel",
-                    data=excel_file,
-                    file_name="Mazo_Interview_Questions.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-
-            # Export to Word
-            word_file = export_to_word(qa_pairs)
-            if word_file:
-                st.download_button(
-                    label="Download as Word",
-                    data=word_file,
-                    file_name="Mazo_Interview_Questions.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+            else:
+                st.warning("No skills found in the job description.")
+        else:
+            st.error("Failed to extract text from the uploaded document.")
 
 if __name__ == "__main__":
     main()
